@@ -5,19 +5,28 @@ from dotenv import load_dotenv
 from urllib.parse import urlparse
 
 
-def is_shorten_link(url):
-    parsed = urlparse(url)
+def is_shorten_link(token, url):
+    response = requests.get(
+        "https://api.vk.com/method/utils.checkLink",
+        params={
+            "url": url,
+            "access_token": token,
+            "v": "5.131"
+        }
+    )
 
-    return parsed.netloc.lower() in {'vk.cc', 'www.vk.cc', 'vk.com', 'www.vk.com'}
+    response.raise_for_status()
+
+    response_json = response.json()
+    if "error" in response_json:
+        error_msg = response_json["error"].get("error_msg", "Unknown error")
+        raise requests.exceptions.HTTPError(
+            f"{error_msg} (Code: {response_json['error'].get('error_code', 'Unknown')})")
+
+    return response_json.get("response", {}).get("link_type") == "shortened"
 
 
 def shorten_link(token, url):
-    if not token:
-        raise ValueError("VK_API_TOKEN не найден в .env")
-
-    if not urlparse(url).scheme:
-        url = f"http://{url}"
-
     response = requests.get(
         "https://api.vk.com/method/utils.getShortLink",
         params={
@@ -27,17 +36,20 @@ def shorten_link(token, url):
         }
     )
 
-    data = response.json()
-    if not response.ok or "error" in data:
-        error_msg = data.get("error", {}).get("error_msg", "Unknown error")
-        raise requests.exceptions.HTTPError(f"{error_msg} (Code: {data.get('error', {}).get('error_code', 'Unknown')}")
+    response.raise_for_status()
 
-    return data["response"]["short_url"]
+    response_json = response.json()
+    if "error" in response_json:
+        error_msg = response_json["error"].get("error_msg", "Unknown error")
+        raise requests.exceptions.HTTPError(
+            f"{error_msg} (Code: {response_json['error'].get('error_code', 'Unknown')})")
+
+    return response_json["response"]["short_url"]
 
 
 def count_clicks(token, short_url):
-    parsed = urlparse(short_url)
-    link_key = parsed.path.lstrip('/')
+    parsed_url = urlparse(short_url)
+    link_key = parsed_url.path.lstrip('/')
 
     response = requests.get(
         "https://api.vk.com/method/utils.getLinkStats",
@@ -45,18 +57,21 @@ def count_clicks(token, short_url):
             "key": link_key,
             "access_token": token,
             "v": "5.131",
-            "interval": "forever"  # Добавляем параметр для получения всей статистики
+            "interval": "forever"
         }
     )
 
-    data = response.json()
-    if not response.ok or "error" in data:
-        error_msg = data.get("error", {}).get("error_msg", "Unknown error")
-        raise requests.exceptions.HTTPError(f"{error_msg} (Code: {data.get('error', {}).get('error_code', 'Unknown')}")
+    response.raise_for_status()
+
+    response_json = response.json()
+    if "error" in response_json:
+        error_msg = response_json["error"].get("error_msg", "Unknown error")
+        raise requests.exceptions.HTTPError(
+            f"{error_msg} (Code: {response_json['error'].get('error_code', 'Unknown')})")
 
     total_clicks = sum(
         period.get("clicks", 0)
-        for period in data.get("response", {}).get("stats", [])
+        for period in response_json.get("response", {}).get("stats", [])
     )
 
     return total_clicks
@@ -64,12 +79,12 @@ def count_clicks(token, short_url):
 
 def main():
     load_dotenv()
-    token = os.getenv("VK_API_TOKEN")
+    token = os.environ["vk_api_token"]
 
     try:
         user_input = input("Введите ссылку: ").strip()
 
-        if is_shorten_link(user_input):
+        if is_shorten_link(token, user_input):
             clicks = count_clicks(token, user_input)
             print(f"Общее количество кликов за всё время: {clicks}")
         else:
